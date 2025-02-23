@@ -1,0 +1,4 @@
+fastapi
+uvicorn
+pandas
+python-multipart  # Required if handling file uploads in future
