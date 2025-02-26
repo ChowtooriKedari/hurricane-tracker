@@ -20,6 +20,18 @@ const floridaBounds = [
   [31.0, -79.8],
 ];
 
+const hurricaneStatuses = {
+  TD: "Tropical Depression (< 34 knots)",
+  TS: "Tropical Storm (34-63 knots)",
+  HU: "Hurricane (> 64 knots)",
+  EX: "Extratropical Cyclone",
+  SD: "Subtropical Depression (< 34 knots)",
+  SS: "Subtropical Storm (> 34 knots)",
+  LO: "Low (Non-cyclone system)",
+  WV: "Tropical Wave",
+  DB: "Disturbance",
+};
+
 // Function to Convert UTC Date and Time to EST
 const convertToEST = (dateStr, timeStr) => {
   if (!dateStr || !timeStr) return "Invalid Date/Time";
@@ -67,6 +79,7 @@ function App() {
           Latitude: parseFloat(row.Latitude),
           Longitude: parseFloat(row.Longitude),
           WindSpeed: row.Max_Wind_Speed,
+          Status:row.Status
         }));
 
       setLandfalls(parsedData);
@@ -110,7 +123,7 @@ function App() {
         <video autoPlay loop muted className="background-video">
           <source src="bg.mp4" type="video/mp4" />
         </video>
-        <h1 className="header-title">Florida Hurricane Tracker - KCC Assignment</h1>
+        <h1 className="header-title">Florida Hurricane Tracker</h1>
  
 
       {/* Warning Message (only when 'Without L' is selected) */}
@@ -153,28 +166,40 @@ function App() {
         <Rectangle bounds={floridaBounds} pathOptions={{ color: "red", weight: 2 }} />
 
         {landfalls.map((entry) => (
-        <Marker
-          key={entry.id}
-          position={[entry.Latitude, entry.Longitude]}
-          icon={hurricaneIcon}
-          eventHandlers={{
-            mouseover: (e) => e.target.openPopup(),
-            mouseout: (e) => e.target.closePopup(),
-          }}
-        >
-          <Popup>
-            <div className="popup-box">
-              <div className="popup-title">{entry.Hurricane}</div>
-              <div className="popup-date">
-                Date & Time: {convertToEST(entry.Date, entry.Time)}
+          <Marker
+            key={entry.id}
+            position={[entry.Latitude, entry.Longitude]}
+            icon={hurricaneIcon}
+            eventHandlers={{
+              mouseover: (e) => e.target.openPopup(),
+              mouseout: (e) => e.target.closePopup(),
+            }}
+          >
+            <Popup>
+              <div className="popup-box fade-in-scale">
+                <div className="popup-title slide-in">{entry.Hurricane}</div>
+
+                <div className="popup-status slide-in-delay">
+                  <span className="popup-label">Status: </span>
+                  <span className={`status-${entry.Status.toLowerCase()}`}>
+                    {hurricaneStatuses[entry.Status] || "Unknown"}
+                  </span>
+                </div>
+
+                <div className="popup-date slide-in-delay-2">
+                  <span className="popup-label">Date & Time: </span>
+                  {convertToEST(entry.Date, entry.Time)}
+                </div>
+
+                <div className="popup-wind bounce-in">
+                  <span className="popup-label">Wind Speed: </span>
+                  {entry.WindSpeed} knots
+                </div>
               </div>
-              <div className="popup-wind">
-                Wind Speed: {entry.WindSpeed} knots 🌪
-              </div>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
+            </Popup>
+          </Marker>
+        ))}
+
       </MapContainer>
     </div>
   );
