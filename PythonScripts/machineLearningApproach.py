@@ -78,7 +78,7 @@ X = df[features]
 y = df["Landfall"].astype(int)  # Convert boolean to integer for classification
 
 # Split dataset into training and testing sets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.6, random_state=42)
 
 # Train a RandomForest Classifier
 clf = RandomForestClassifier(n_estimators=100, random_state=42)
@@ -91,8 +91,9 @@ classification_rep = classification_report(y_test, y_pred)
 
 # Save the predictions to a CSV file
 df["Predicted_Landfall"] = clf.predict(X)
-output_file_path = "PythonScripts/florida_hurricane_predictions.csv"
+output_file_path = "PythonScripts/florida_hurricane_predictions_60_40.csv"
 df[df["Predicted_Landfall"] == 1].to_csv(output_file_path, index=False)
 
+print(output_file_path, accuracy)
 # Return the results
 output_file_path, accuracy, classification_rep
