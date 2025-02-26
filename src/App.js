@@ -1,138 +1,177 @@
 import React, { useEffect, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Rectangle } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Rectangle } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import axios from "axios";
+import * as d3 from "d3";
 import L from "leaflet";
-import "./App.css"; // Import CSS for loader
-import hurricaneImage from "./assets/hurricane.png"; // Local hurricane icon
+import "./App.css";
+import hurricaneImage from "./assets/hurricane.png";
 
-const hurricaneIcon = new L.Icon({
-  iconUrl: hurricaneImage,
-  iconSize: [30, 30],
-  iconAnchor: [15, 15],
-  popupAnchor: [0, -15],
+const hurricaneIcon = new L.DivIcon({
+  html: `<img src="${hurricaneImage}" class="hurricane-icon spin" alt="Hurricane Icon" />`,
+  className: "",
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+  popupAnchor: [0, -10],
 });
 
-// Function to Convert Date & Time to EST
+const floridaBounds = [
+  [24.5, -87.6],
+  [31.0, -79.8],
+];
+
 const convertToEST = (dateStr, timeStr) => {
   if (!dateStr || !timeStr) return "Invalid Date/Time";
 
-  // Parse Date (YYYYMMDD → MM/DD/YYYY)
   const year = dateStr.substring(0, 4);
   const month = dateStr.substring(4, 6);
   const day = dateStr.substring(6, 8);
   const formattedDate = `${month}/${day}/${year}`;
 
-  // Parse Time (HHMM → HH:MM AM/PM EST)
-  const utcHours = parseInt(timeStr.substring(0, 2), 10);
+  let utcHours = parseInt(timeStr.substring(0, 2), 10);
   const minutes = timeStr.substring(2, 4);
 
-  // Convert UTC to EST (UTC-5 or UTC-4 during DST)
-  let estHours = utcHours - 5; // Convert from UTC to EST
-  if (estHours < 0) estHours += 24; // Adjust for midnight wrap-around
+  let estHours = utcHours - 5;
+  if (estHours < 0) estHours += 24;
 
   const ampm = estHours >= 12 ? "PM" : "AM";
-  const displayHours = estHours % 12 === 0 ? 12 : estHours % 12; // Convert to 12-hour format
-
+  const displayHours = estHours % 12 === 0 ? 12 : estHours % 12;
   const formattedTime = `${displayHours}:${minutes} ${ampm} EST`;
 
   return `${formattedDate} ${formattedTime}`;
 };
 
-const floridaBounds = [
-  [24.5, -87.6], // Bottom-left (SW)
-  [31.0, -79.8], // Top-right (NE)
-];
-
 function App() {
-  const [hurricanes, setHurricanes] = useState([]);
   const [landfalls, setLandfalls] = useState([]);
-  const [selectedYear, setSelectedYear] = useState("1900");
+  const [selectedYear, setSelectedYear] = useState("");
   const [years, setYears] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [usingL, setUsingL] = useState(true);
 
-  useEffect(() => {
-    setLoading(true);
-    axios.get("https://backend-api-2r7i.onrender.com/api/florida-landfalls").then((response) => {
-      setLandfalls(response.data);
+  // Function to Load CSV Data for the Selected Year
+  const loadCSVData = (file, year) => {
+    d3.csv(file).then((data) => {
+      if (!data || data.length === 0) {
+        console.error("CSV file is empty:", file);
+        return;
+      }
 
-      // Extract unique years from landfalls data
-      const uniqueYears = [...new Set(response.data.map((entry) => entry.Year))]
+      const parsedData = data
+        .filter((row) => row.Year.trim() === year)
+        .map((row, index) => ({
+          id: `${row.Year}-${row.Name}-${index}`,
+          Year: row.Year.trim(),
+          Hurricane: row.Name?.trim(),
+          Date: row.Date.trim(),
+          Time: row.Time.trim(),
+          Latitude: parseFloat(row.Latitude),
+          Longitude: parseFloat(row.Longitude),
+          WindSpeed: row.Max_Wind_Speed,
+        }));
+
+      setLandfalls(parsedData);
+    });
+  };
+
+  // Function to Load Years from CSV
+  const loadYears = (file) => {
+    d3.csv(file).then((data) => {
+      if (!data || data.length === 0) {
+        console.error("CSV file is empty:", file);
+        return;
+      }
+
+      const uniqueYears = [...new Set(data.map((entry) => entry.Year.trim()))]
         .filter((year) => year >= 1900)
         .sort((a, b) => b - a);
-      setYears(uniqueYears);
-    });
 
-    axios.get("https://backend-api-2r7i.onrender.com/api/hurricanes").then((response) => {
-      setHurricanes(response.data);
-      setLoading(false);
+      setYears(uniqueYears);
+      setSelectedYear(uniqueYears[0] || "");
     });
-  }, []);
+  };
+
+  useEffect(() => {
+    const file = usingL ? "/florida_landfalls_using_L.csv" : "/florida_landfalls_without_using_L.csv";
+    loadYears(file);
+  }, [usingL]);
+
+  useEffect(() => {
+    if (selectedYear) {
+      const file = usingL ? "/florida_landfalls_using_L.csv" : "/florida_landfalls_without_using_L.csv";
+      loadCSVData(file, selectedYear);
+    }
+  }, [selectedYear, usingL]);
 
   return (
     <div>
-      <h1 style={{ textAlign: "center" }}>Hurricane Tracker</h1>
+      {/* Header Section */}
+      <header className="header">
+        <video autoPlay loop muted className="background-video">
+          <source src="bg.mp4" type="video/mp4" />
+        </video>
+        <h1 className="header-title">Florida Hurricane Tracker</h1>
+ 
 
-      {loading && (
-        <div className="loader-container">
-          <div className="spinner"></div>
-          <p>Loading hurricane data...</p>
+      {/* Warning Message (only when 'Without L' is selected) */}
+      {!usingL && (
+        <div className="warning-banner">
+          Results may contain false positives due to approximations used in landfall detection
         </div>
       )}
+     </header>
+      {/* Toggle Switch */}
+      <div className="toggle-container">
+        <span className="toggle-label">Without L</span>
+        <label className="toggle-switch">
+          <input type="checkbox" checked={usingL} onChange={() => setUsingL(!usingL)} />
+          <span className="slider"></span>
+        </label>
+        <span className="toggle-label">Using L</span>
+      </div>
 
-      {!loading && (
-        <div style={{ textAlign: "center", marginBottom: "10px" }}>
-          <label htmlFor="year-select">Select Year: </label>
-          <select id="year-select" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)}>
-            {years.map((year) => (
-              <option key={year} value={year}>
-                {year}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+      {/* Year Selection Dropdown */}
+      <div className="dropdown-container">
+        <label htmlFor="year-select">Select Year: </label>
+        <select
+          id="year-select"
+          value={selectedYear}
+          onChange={(e) => setSelectedYear(e.target.value)}
+        >
+          {years.map((year) => (
+            <option key={`year-${year}`} value={year}>
+              {year}
+            </option>
+          ))}
+        </select>
+      </div>
 
-      {!loading && (
-        <MapContainer center={[27.5, -83.5]} zoom={5} style={{ height: "600px", width: "100%" }}>
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      {/* Map Display */}
+      <MapContainer center={[27.5, -83.5]} zoom={5} style={{ height: "600px", width: "100%" }}>
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <Rectangle bounds={floridaBounds} pathOptions={{ color: "red", weight: 2 }} />
 
-          <Rectangle bounds={floridaBounds} pathOptions={{ color: "red", weight: 2 }} />
-
-          {hurricanes
-            .filter((storm) => storm.Year === selectedYear)
-            .map((storm) =>
-              storm.Entries.map((entry, index) => (
-                <Polyline
-                  key={`${storm.Name}-${storm.Year}-${storm.Cyclone_Number}-${entry.Date}-${entry.Time}-${entry.Latitude}-${entry.Longitude}-${entry.Max_Wind_Speed}-${index}`}
-                  positions={storm.Entries.map((e) => [e.Latitude, e.Longitude])}
-                  pathOptions={{ color: "blue", weight: 1 }}
-                />
-              ))
-            )}
-
-          {/* Florida Landfall Markers with Custom Icon & Hover Popup */}
-          {landfalls
-            .filter((entry) => entry.Year === selectedYear)
-            .map((entry, index) => (
-              <Marker
-                key={index}
-                position={[entry.Latitude, entry.Longitude]}
-                icon={hurricaneIcon}
-                eventHandlers={{
-                  mouseover: (e) => e.target.openPopup(),
-                  mouseout: (e) => e.target.closePopup(),
-                }}
-              >
-                <Popup>
-                  <strong>{entry.Hurricane}</strong> <br />
-                  Date & Time: {convertToEST(entry.Date, entry.Time)} <br />
-                  Wind Speed: {entry["Max Wind Speed (knots)"]} knots
-                </Popup>
-              </Marker>
-            ))}
-        </MapContainer>
-      )}
+        {landfalls.map((entry) => (
+        <Marker
+          key={entry.id}
+          position={[entry.Latitude, entry.Longitude]}
+          icon={hurricaneIcon}
+          eventHandlers={{
+            mouseover: (e) => e.target.openPopup(),
+            mouseout: (e) => e.target.closePopup(),
+          }}
+        >
+          <Popup>
+            <div className="popup-box">
+              <div className="popup-title">{entry.Hurricane}</div>
+              <div className="popup-date">
+                Date & Time: {convertToEST(entry.Date, entry.Time)}
+              </div>
+              <div className="popup-wind">
+                Wind Speed: {entry.WindSpeed} knots 🌪
+              </div>
+            </div>
+          </Popup>
+        </Marker>
+      ))}
+      </MapContainer>
     </div>
   );
 }

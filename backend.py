@@ -1,22 +1,46 @@
 from fastapi import FastAPI
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
+from geopy.distance import geodesic
+import geopandas as gpd
+from shapely.geometry import Point
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins (frontend)
+    allow_origins=["*"],  
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],  
+    allow_headers=["*"],  
 )
 
 HURDAT2_FILE = "Hurricanes.txt"
 
-FLORIDA_LAT_MIN, FLORIDA_LAT_MAX = 24.5, 31.0
-FLORIDA_LON_MIN, FLORIDA_LON_MAX = -87.6, -79.8
+# Load Florida boundary from shapefile
+admin1_shapefile = "ne_10m_admin_1_states_provinces.shp"  # Update with the correct path
+states = gpd.read_file(admin1_shapefile)
+florida = states[states["name"] == "Florida"]
 
+def is_on_land(latitude, longitude):
+    """ Check if a given latitude and longitude is inside Florida. """
+    point = Point(longitude, latitude)
+    return florida.geometry.contains(point).any()
+
+def calculate_distance(coord1, coord2):
+    """Returns distance in miles between two (lat, lon) coordinates, ensuring valid range."""
+    lat1, lon1 = coord1
+    lat2, lon2 = coord2
+
+    # Validate latitudes
+    if not (-90 <= lat1 <= 90) or not (-90 <= lat2 <= 90):
+        return float('inf')  # Prevent false detection
+
+    # Validate longitudes
+    if not (-180 <= lon1 <= 180) or not (-180 <= lon2 <= 180):
+        return float('inf')  # Prevent false detection
+
+    return geodesic(coord1, coord2).miles  # Always return a valid distance
 
 def parse_hurdat2():
     """ Reads HURDAT2 file and returns parsed storm data. """
@@ -27,10 +51,9 @@ def parse_hurdat2():
     current_storm = None
 
     for line in lines:
-        parts = [p.strip() for p in line.strip().split(",") if p.strip()]
+        parts = [p if p != "" else " " for p in line.strip().split(",")]
 
-        # Header line (storm metadata)
-        if len(parts) == 3:
+        if len(parts) == 4:
             if current_storm and current_storm["Entries"]:
                 parsed_data.append(current_storm)
 
@@ -39,76 +62,108 @@ def parse_hurdat2():
                     "Basin": parts[0][:2],
                     "Cyclone_Number": parts[0][2:4],
                     "Year": parts[0][4:8],
-                    "Name": parts[1],
-                    "Data_Count": int(parts[2]),
+                    "Name": parts[1].strip(),
+                    "Data_Count": int(parts[2].strip()),
                     "Entries": []
                 }
             except ValueError:
-                continue  # Skip malformed headers
+                current_storm = None
+                continue
 
-        # Data entry (storm track records)
         elif len(parts) >= 8 and current_storm:
             try:
-                lat_str, lon_str = parts[4], parts[5]
+                date = parts[0].strip()
+                time = parts[1].strip()
+                status = parts[3].strip()
 
-                if not lat_str or not lon_str:
+                lat_value = float(parts[4][:-1])
+                lat_direction = parts[4][-1]
+                lon_value = float(parts[5][:-1])
+                lon_direction = parts[5][-1]
+
+                if lon_value > 180:
+                    lon_value -= 360
+
+                latitude = lat_value if lat_direction == "N" else -lat_value
+                longitude = -lon_value if lon_direction == "W" else lon_value
+
+                if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
                     continue
 
-                lat = float(lat_str[:-1]) * (1 if "N" in lat_str else -1)
-                lon = float(lon_str[:-1]) * (-1 if "W" in lon_str else 1)
+                max_wind_speed = int(parts[6].strip()) if parts[6].strip().isdigit() else 0
+                min_pressure = int(parts[7].strip()) if len(parts) > 7 and parts[7].strip().isdigit() else None
 
                 entry = {
-                    "Date": parts[0],
-                    "Time": parts[1],
-                    "Indicator": parts[2],  # 'L' means landfall
-                    "Status": parts[3],
-                    "Latitude": lat,
-                    "Longitude": lon,
-                    "Max_Wind_Speed": int(parts[6]) if parts[6].isdigit() else 0
+                    "Date": date,
+                    "Time": time,
+                    "Status": status,
+                    "Latitude": latitude,
+                    "Longitude": longitude,
+                    "Max_Wind_Speed": max_wind_speed,
+                    "Min_Pressure": min_pressure
                 }
 
                 current_storm["Entries"].append(entry)
+
             except ValueError:
-                continue  # Skip invalid data
+                continue
 
     if current_storm and current_storm["Entries"]:
         parsed_data.append(current_storm)
 
     return parsed_data
 
+@app.get("/api/florida-landfalls")
+def get_florida_landfalls():
+    """ Detect hurricanes that made landfall in Florida **without relying on 'L' indicator**. """
+    parsed_data = parse_hurdat2()
+    florida_landfalls = []
+
+    for storm in parsed_data:
+        if int(storm["Year"]) >= 1900:
+            previous_entry = None
+
+            for entry in storm["Entries"]:
+                if previous_entry:
+                    offshore = not is_on_land(previous_entry["Latitude"], previous_entry["Longitude"])
+                    on_land = is_on_land(entry["Latitude"], entry["Longitude"])
+
+                    # Detecting a sudden wind speed drop (storm weakens)
+                    wind_speed_drop = (
+                        previous_entry["Max_Wind_Speed"] > 0 and
+                        entry["Max_Wind_Speed"] < previous_entry["Max_Wind_Speed"] * 0.8  # 20% drop
+                    )
+
+                    # Ensuring the storm moves inland (not just passing)
+                    inland_movement = (
+                        calculate_distance(
+                            (entry["Latitude"], entry["Longitude"]),
+                            (previous_entry["Latitude"], previous_entry["Longitude"])
+                        ) < 50  # Hurricane should slow down after landfall
+                    )
+
+                    # If a hurricane moves from offshore to land and weakens, it's a landfall
+                    if offshore and on_land and (wind_speed_drop or inland_movement):
+                        florida_landfalls.append({
+                            "Hurricane": storm["Name"],
+                            "Year": storm["Year"],
+                            "Date": entry["Date"],
+                            "Time": entry["Time"],
+                            "Latitude": entry["Latitude"],
+                            "Longitude": entry["Longitude"],
+                            "Max Wind Speed (knots)": entry["Max_Wind_Speed"]
+                        })
+                        break  # Only capture the first landfall
+
+                previous_entry = entry  # Update for next iteration
+
+    print(f"Total Florida Landfalls Found: {len(florida_landfalls)}")
+    return florida_landfalls
 
 @app.get("/api/hurricanes")
 def get_hurricanes():
     """ Returns all hurricane data. """
     return parse_hurdat2()
 
-
-@app.get("/api/florida-landfalls")
-def get_florida_landfalls():
-    """ Returns hurricanes that made landfall in Florida since 1900. """
-    parsed_data = parse_hurdat2()
-    florida_landfalls = []
-
-    for storm in parsed_data:
-        if int(storm["Year"]) >= 1900:  # Ensure year is 1900 or later
-            for entry in storm["Entries"]:
-                if (
-                    FLORIDA_LAT_MIN <= entry["Latitude"] <= FLORIDA_LAT_MAX
-                    and FLORIDA_LON_MIN <= entry["Longitude"] <= FLORIDA_LON_MAX
-                    and entry["Indicator"] == "L"
-                ):
-                    florida_landfalls.append({
-                        "Hurricane": storm["Name"],
-                        "Year": storm["Year"],
-                        "Date": entry["Date"],
-                        "Time": entry["Time"],
-                        "Latitude": entry["Latitude"],
-                        "Longitude": entry["Longitude"],
-                        "Max Wind Speed (knots)": entry["Max_Wind_Speed"]
-                    })
-
-    return florida_landfalls
-
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run("backend:app", host="0.0.0.0", port=8000, timeout_keep_alive=120)
