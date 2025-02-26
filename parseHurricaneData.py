@@ -1,33 +1,46 @@
 import csv
 
+# The file downlaoded from https://www.nhc.noaa.gov/data/hurdat/hurdat2-1851-2023-051124.txt
 HURDAT2_FILE = "Hurricanes.txt"
+
+# The output file that will be created and stores all the parsed data
 OUTPUT_CSV_FILE = "hurricane_data.csv"
 
 def parse_hurdat2():
-    """ Parses the HURDAT2 file and saves all hurricane data as-is to a CSV file. """
     with open(HURDAT2_FILE, "r") as file:
         lines = file.readlines()
     count=0
     parsed_data = []
     current_storm = None
 
+    # Iterate through each line in the file
     for line in lines:
-        parts = [p.strip() for p in line.split(",")]  # Split by commas and remove spaces
 
-        # If it's a header line (storm metadata)
+        # Split the line by commas and strip whitespace
+        parts = [p.strip() for p in line.split(",")]
+
+        # If the line has 4 parts, it's a new storm
+        # As it was mentioned in the https://www.nhc.noaa.gov/data/hurdat/hurdat2-format-atl-1851-2021.pdf
+        # The first part is the basin, the second is the name, and the third is the data count, and 
+        # the fourth is extra value generated after the value, which is empty
+
         if len(parts) == 4:
             if current_storm and current_storm["Entries"]:
-                parsed_data.extend(current_storm["Entries"])  # Store previous storm's entries
+                parsed_data.extend(current_storm["Entries"])
 
             current_storm = {
-                "Basin": parts[0],  # Full Basin Code (e.g., AL031851)
+                "Basin": parts[0],
                 "Name": parts[1].strip(),
                 "Entries": []
             }
+        
+        # If the line has 8 or more parts, it's an entry for the current storm
+        # The format is according to the documentation provided at https://www.nhc.noaa.gov/data/hurdat/hurdat2-format-atl-1851-2021.pdf
 
-        # If it's a data entry (storm track record)
         elif len(parts) >= 8 and current_storm:
             count+=1
+
+            # Parse the entry
             entry = {
                 "Basin": current_storm["Basin"],
                 "Name": current_storm["Name"],
@@ -53,18 +66,22 @@ def parse_hurdat2():
                 "64kt_NW": parts[19].strip() if len(parts) > 19 else None,
                 "Radius_Max_Wind": parts[20].strip() if len(parts) > 20 else None,
             }
-
+            
+            # Append the entry to the current storm's entries
             current_storm["Entries"].append(entry)
 
-    # Save remaining storm data
+    # Append the last storm's entries
     if current_storm and current_storm["Entries"]:
         parsed_data.extend(current_storm["Entries"])
     print(count)
+
+    # Return the parsed data
     return parsed_data
 
 
 def save_to_csv(parsed_data):
-    """ Saves the parsed hurricane data to a CSV file. """
+
+    # Define the fieldnames for the CSV
     fieldnames = [
         "Basin", "Name", "Date", "Time", "Indicator", "Status", "Latitude", "Longitude",
         "Max_Wind_Speed", "Min_Pressure", "34kt_NE", "34kt_SE", "34kt_SW", "34kt_NW",
@@ -72,6 +89,7 @@ def save_to_csv(parsed_data):
         "Radius_Max_Wind"
     ]
 
+    # Write the parsed data to a CSV file
     with open(OUTPUT_CSV_FILE, mode="w", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
@@ -79,5 +97,9 @@ def save_to_csv(parsed_data):
 
 
 if __name__ == "__main__":
+
+    # Parse the HURDAT2 file and save the data to CSV
     parsed_data = parse_hurdat2()
+
+    # Save the parsed data to CSV
     save_to_csv(parsed_data)

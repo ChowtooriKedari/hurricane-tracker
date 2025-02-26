@@ -14,11 +14,13 @@ const hurricaneIcon = new L.DivIcon({
   popupAnchor: [0, -10],
 });
 
+// Florida Bounds for Map
 const floridaBounds = [
   [24.5, -87.6],
   [31.0, -79.8],
 ];
 
+// Function to Convert UTC Date and Time to EST
 const convertToEST = (dateStr, timeStr) => {
   if (!dateStr || !timeStr) return "Invalid Date/Time";
 
@@ -88,6 +90,7 @@ function App() {
     });
   };
 
+  // Load Years and Data on Component Mount
   useEffect(() => {
     const file = usingL ? "/florida_landfalls_using_L.csv" : "/florida_landfalls_without_using_L.csv";
     loadYears(file);
@@ -107,7 +110,7 @@ function App() {
         <video autoPlay loop muted className="background-video">
           <source src="bg.mp4" type="video/mp4" />
         </video>
-        <h1 className="header-title">Florida Hurricane Tracker</h1>
+        <h1 className="header-title">Florida Hurricane Tracker - KCC Assignment</h1>
  
 
       {/* Warning Message (only when 'Without L' is selected) */}
@@ -117,7 +120,8 @@ function App() {
         </div>
       )}
      </header>
-      {/* Toggle Switch */}
+
+      {/* Toggle Switch*/}
       <div className="toggle-container">
         <span className="toggle-label">Without L</span>
         <label className="toggle-switch">
